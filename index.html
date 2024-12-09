@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cigarette Tracker</title>
     <link rel="manifest" href="/manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary-color: #2c3e50;
@@ -86,19 +87,24 @@
             background-color: #e74c3c;
         }
 
-        #chart {
+        #consumptionChart {
             width: 100%;
-            height: 250px;
-            margin-top: 1rem;
+            max-height: 300px;
         }
 
-        .action-buttons {
+        .chart-controls {
             display: flex;
-            gap: 1rem;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .analysis-section {
+            margin-top: 1rem;
+            text-align: center;
         }
 
         @media (max-width: 480px) {
-            .action-buttons {
+            .chart-controls {
                 flex-direction: column;
             }
         }
@@ -119,32 +125,45 @@
     </div>
 
     <div class="container">
-        <h2>Consumption History</h2>
-        <div id="chart">No data available</div>
+        <div class="chart-controls">
+            <select id="chartPeriodSelect">
+                <option value="7">Last 7 Days</option>
+                <option value="30">Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+            </select>
+            <select id="chartTypeSelect">
+                <option value="daily">Daily Consumption</option>
+                <option value="cumulative">Cumulative Consumption</option>
+            </select>
+        </div>
+        <canvas id="consumptionChart"></canvas>
     </div>
 
-    <div class="container action-buttons">
+    <div class="container analysis-section">
+        <h3>Consumption Analysis</h3>
+        <p>Average Daily Cigarettes: <span id="avgDailyCigarettes">-</span></p>
+        <p>Total Cigarettes: <span id="totalCigarettes">-</span></p>
+        <p>Estimated Money Saved: <span id="moneySaved">-</span></p>
+    </div>
+
+    <div class="container">
         <button id="setGoalBtn" class="btn">Set Daily Goal</button>
         <button id="resetDataBtn" class="btn btn-danger">Reset All Data</button>
     </div>
 
     <script>
-        // Cigarette Tracker Application
         class CigaretteTracker {
             constructor() {
                 // Initialize elements
-                this.todayCountEl = document.getElementById('todayCount');
-                this.dailyGoalEl = document.getElementById('dailyGoal');
-                this.goalStatusEl = document.getElementById('goalStatus');
-                this.logCigaretteBtn = document.getElementById('logCigaretteBtn');
-                this.undoLastBtn = document.getElementById('undoLastBtn');
-                this.setGoalBtn = document.getElementById('setGoalBtn');
-                this.resetDataBtn = document.getElementById('resetDataBtn');
-                this.chartEl = document.getElementById('chart');
+                this.initializeElements();
 
                 // Initialize data
                 this.cigaretteLog = JSON.parse(localStorage.getItem('cigaretteLog')) || [];
                 this.dailyGoal = parseInt(localStorage.getItem('dailyGoal')) || 10;
+                this.cigarettePrice = parseFloat(localStorage.getItem('cigarettePrice')) || 0.50; // Price per cigarette
+
+                // Initialize chart
+                this.initializeChart();
 
                 // Bind events
                 this.bindEvents();
@@ -152,6 +171,53 @@
                 // Initial render
                 this.renderStats();
                 this.renderChart();
+                this.renderAnalysis();
+            }
+
+            initializeElements() {
+                this.todayCountEl = document.getElementById('todayCount');
+                this.dailyGoalEl = document.getElementById('dailyGoal');
+                this.goalStatusEl = document.getElementById('goalStatus');
+                this.logCigaretteBtn = document.getElementById('logCigaretteBtn');
+                this.undoLastBtn = document.getElementById('undoLastBtn');
+                this.setGoalBtn = document.getElementById('setGoalBtn');
+                this.resetDataBtn = document.getElementById('resetDataBtn');
+                this.chartPeriodSelect = document.getElementById('chartPeriodSelect');
+                this.chartTypeSelect = document.getElementById('chartTypeSelect');
+                this.consumptionChartEl = document.getElementById('consumptionChart');
+
+                // Analysis elements
+                this.avgDailyCigarettesEl = document.getElementById('avgDailyCigarettes');
+                this.totalCigarettesEl = document.getElementById('totalCigarettes');
+                this.moneySavedEl = document.getElementById('moneySaved');
+            }
+
+            initializeChart() {
+                this.consumptionChart = new Chart(this.consumptionChartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Daily Cigarettes',
+                            data: [],
+                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Number of Cigarettes'
+                                }
+                            }
+                        }
+                    }
+                });
             }
 
             bindEvents() {
@@ -159,6 +225,8 @@
                 this.undoLastBtn.addEventListener('click', () => this.undoLastCigarette());
                 this.setGoalBtn.addEventListener('click', () => this.setDailyGoal());
                 this.resetDataBtn.addEventListener('click', () => this.resetData());
+                this.chartPeriodSelect.addEventListener('change', () => this.renderChart());
+                this.chartTypeSelect.addEventListener('change', () => this.renderChart());
             }
 
             logCigarette() {
@@ -170,6 +238,7 @@
                 this.saveLog();
                 this.renderStats();
                 this.renderChart();
+                this.renderAnalysis();
             }
 
             undoLastCigarette() {
@@ -178,6 +247,7 @@
                     this.saveLog();
                     this.renderStats();
                     this.renderChart();
+                    this.renderAnalysis();
                 }
             }
 
@@ -198,6 +268,7 @@
                     this.saveLog();
                     this.renderStats();
                     this.renderChart();
+                    this.renderAnalysis();
                 }
             }
 
@@ -223,35 +294,77 @@
             }
 
             renderChart() {
-                const dailyCounts = this.cigaretteLog.reduce((acc, entry) => {
+                const period = parseInt(this.chartPeriodSelect.value);
+                const chartType = this.chartTypeSelect.value;
+                const now = new Date();
+                
+                // Filter log based on selected period
+                const filteredLog = this.cigaretteLog.filter(entry => {
+                    const entryDate = new Date(entry.timestamp);
+                    const daysDiff = (now - entryDate) / (1000 * 60 * 60 * 24);
+                    return daysDiff <= period;
+                });
+
+                // Group by date
+                const dailyCounts = filteredLog.reduce((acc, entry) => {
                     const date = new Date(entry.timestamp).toLocaleDateString();
                     acc[date] = (acc[date] || 0) + 1;
                     return acc;
                 }, {});
 
-                const chartData = Object.entries(dailyCounts)
-                    .map(([date, count]) => `${date}: ${count}`)
-                    .join('\n');
+                // Prepare chart data
+                const sortedDates = Object.keys(dailyCounts).sort((a, b) => new Date(a) - new Date(b));
+                const labels = sortedDates;
+                let data = sortedDates.map(date => dailyCounts[date]);
 
-                this.chartEl.textContent = chartData || 'No data available';
+                // Cumulative calculation if needed
+                if (chartType === 'cumulative') {
+                    data = data.reduce((acc, curr, idx) => {
+                        const prevTotal = idx > 0 ? acc[idx - 1] : 0;
+                        acc.push(prevTotal + curr);
+                        return acc;
+                    }, []);
+                }
+
+                // Update chart
+                this.consumptionChart.data.labels = labels;
+                this.consumptionChart.data.datasets[0].label = 
+                    chartType === 'daily' ? 'Daily Cigarettes' : 'Cumulative Cigarettes';
+                this.consumptionChart.data.datasets[0].data = data;
+                this.consumptionChart.update();
+            }
+
+            renderAnalysis() {
+                // Calculate average daily consumption
+                const totalCigarettes = this.cigaretteLog.length;
+                const daysCovered = this.calculateDaysCovered();
+                const avgDaily = daysCovered > 0 
+                    ? (totalCigarettes / daysCovered).toFixed(1) 
+                    : '0';
+
+                // Estimate money saved (based on a default cigarette price)
+                const moneySaved = (totalCigarettes * this.cigarettePrice).toFixed(2);
+
+                // Update analysis elements
+                this.avgDailyCigarettesEl.textContent = avgDaily;
+                this.totalCigarettesEl.textContent = totalCigarettes;
+                this.moneySavedEl.textContent = `$${moneySaved}`;
+            }
+
+            calculateDaysCovered() {
+                if (this.cigaretteLog.length === 0) return 0;
+                
+                const firstEntry = new Date(this.cigaretteLog[0].timestamp);
+                const lastEntry = new Date(this.cigaretteLog[this.cigaretteLog.length - 1].timestamp);
+                
+                // Calculate days between first and last entry
+                const daysDiff = (lastEntry - firstEntry) / (1000 * 60 * 60 * 24);
+                return Math.max(1, Math.ceil(daysDiff));
             }
         }
 
         // Initialize the tracker
         const tracker = new CigaretteTracker();
-
-        // Basic PWA support
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js')
-                    .then(registration => {
-                        console.log('Service Worker registered with scope:', registration.scope);
-                    })
-                    .catch(error => {
-                        console.log('Service Worker registration failed:', error);
-                    });
-            });
-        }
     </script>
 </body>
 </html>
