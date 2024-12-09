@@ -1,0 +1,17 @@
+{
+    "name": "Cigarette Tracker",
+    "short_name": "CigTracker",
+    "description": "Track and reduce your cigarette consumption",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ecf0f1",
+    "theme_color": "#2c3e50",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "icon.png",
+            "sizes": "192x192",
+            "type": "image/png"
+          }
+    ]
+}
